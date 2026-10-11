@@ -26,7 +26,7 @@ from sklearn.metrics import accuracy_score, precision_score, confusion_matrix, r
 
 # Load the csv file
 
-dataframe = pd.read_csv("./Desktop/DataFlair/credit_card_fraud_detection/creditcard.csv")
+dataframe = pd.read_csv("creditcard.csv")
 dataframe.head()
 
 
@@ -251,18 +251,51 @@ metrics(test_Y, predictions_rf.round())
 # In[27]:
 
 
-# Performing oversampling on RF and DT
+# Performing oversampling on the training data only
 
 from imblearn.over_sampling import SMOTE
 
-X_resampled, Y_resampled = SMOTE().fit_resample(X, Y)
-print("Resampled shape of X: ", X_resampled.shape)
-print("Resampled shape of Y: ", Y_resampled.shape)
+# Step 1: Split the original dataset before applying SMOTE
+train_X, test_X, train_Y, test_Y = train_test_split(
+    X,
+    Y,
+    test_size=0.3,
+    random_state=42,
+    stratify=Y
+)
+
+# Step 2: Apply SMOTE only to the training data
+smote = SMOTE(random_state=42)
+X_resampled, Y_resampled = smote.fit_resample(train_X, train_Y)
+
+print("Original training shape of X:", train_X.shape)
+print("Resampled training shape of X:", X_resampled.shape)
+print("Resampled training shape of Y:", Y_resampled.shape)
 
 value_counts = Counter(Y_resampled)
-print(value_counts)
+print("Class distribution after SMOTE:", value_counts)
 
-(train_X, test_X, train_Y, test_Y) = train_test_split(X_resampled, Y_resampled, test_size= 0.3, random_state= 42)
+# Step 3: Train the Random Forest classifier
+rf_resampled = RandomForestClassifier(n_estimators=100, random_state=42)
+rf_resampled.fit(X_resampled, Y_resampled)
+
+# Step 4: Evaluate on the original test data
+predictions_resampled = rf_resampled.predict(test_X)
+random_forest_score_resampled = rf_resampled.score(test_X, test_Y) * 100
+
+print("Random Forest accuracy after SMOTE:", random_forest_score_resampled, "%")
+
+# Step 5: Display the confusion matrix
+cm_resampled = confusion_matrix(test_Y, predictions_resampled)
+
+print("Confusion Matrix - Random Forest after SMOTE")
+print(cm_resampled)
+
+plot_confusion_matrix(
+    cm_resampled,
+    classes=[0, 1],
+    title="Confusion Matrix - Random Forest After SMOTE"
+)
 
 
 # In[35]:
@@ -282,7 +315,7 @@ random_forest_score_resampled = rf_resampled.score(test_X, test_Y) * 100
 
 # Visualize the confusion matrix
 
-cm_resampled = confusion_matrix(test_Y, y_predict.round())
+cm_resampled = confusion_matrix(test_Y, predictions_resampled)
 print("Confusion Matrix - Random Forest")
 print(cm_resampled)
 

@@ -8,7 +8,7 @@ The objective is to analyze transaction data, address class imbalance, train cla
 
 ## Dataset
 
-The project is designed for the Credit Card Fraud Detection dataset available on Kaggle:
+This project uses the Credit Card Fraud Detection dataset available on Kaggle:
 
 https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
 
@@ -17,7 +17,7 @@ The dataset contains anonymized transaction features, transaction amounts, times
 - `Class = 0`: Legitimate transaction
 - `Class = 1`: Fraudulent transaction
 
-The dataset is not included in this repository.
+**The dataset is not included in this repository.** Download it from Kaggle and place `creditcard.csv` in the project root directory.
 
 ## Technologies
 
@@ -34,7 +34,7 @@ The dataset is not included in this repository.
 1. Load and inspect the transaction dataset.
 2. Perform exploratory data analysis.
 3. Examine missing values and class distribution.
-4. Scale the transaction amount.
+4. Prepare and scale the relevant features.
 5. Split the data into training and test sets.
 6. Train Decision Tree and Random Forest classifiers.
 7. Evaluate the models using classification metrics and confusion matrices.
@@ -52,18 +52,10 @@ The project uses the following metrics:
 
 Precision, recall, and F1-score are particularly important because fraudulent transactions represent a small minority of the dataset.
 
-## Repository Structure
+## Installation
 
-```text
-credit-card-fraud-detection/
-├── credit_card_fraud.ipynb
-├── credit_card_fraud.py
-├── requirements.txt
-├── .gitignore
-└── README.md
+Clone the repository:
 
-
-
-
-
-
+```bash
+git clone https://github.com/Chen729689OUGK/credit-card-fraud-detection.git
+cd credit-card-fraud-detection
