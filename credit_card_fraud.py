@@ -1,343 +1,220 @@
 #!/usr/bin/env python
-# coding: utf-8
+"""Credit card fraud detection with a leakage-free SMOTE pipeline."""
 
-# ## Credit Card Fraud Detection Project
+from __future__ import annotations
 
-# In[17]:
+import argparse
+from pathlib import Path
 
-
-# Import the necessary modules
-
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-from collections import Counter
-import itertools
-
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score, precision_score, confusion_matrix, recall_score, f1_score
-
-
-# In[2]:
-
-
-# Load the csv file
-
-dataframe = pd.read_csv("creditcard.csv")
-dataframe.head()
-
-
-# ### Perform Exploratory Data Analysis
-
-# In[3]:
-
-
-dataframe.info()
-
-
-# In[4]:
-
-
-# Check for null values
-
-dataframe.isnull().values.any()
-
-
-# In[5]:
-
-
-dataframe["Amount"].describe()
-
-
-# In[6]:
-
-
-non_fraud = len(dataframe[dataframe.Class == 0])
-fraud = len(dataframe[dataframe.Class == 1])
-fraud_percent = (fraud / (fraud + non_fraud)) * 100
-
-print("Number of Genuine transactions: ", non_fraud)
-print("Number of Fraud transactions: ", fraud)
-print("Percentage of Fraud transactions: {:.4f}".format(fraud_percent))
-
-
-# In[7]:
-
-
-# Visualize the "Labels" column in our dataset
-
-labels = ["Genuine", "Fraud"]
-count_classes = dataframe.value_counts(dataframe['Class'], sort= True)
-count_classes.plot(kind = "bar", rot = 0)
-plt.title("Visualization of Labels")
-plt.ylabel("Count")
-plt.xticks(range(2), labels)
-plt.show()
-
-
-# In[8]:
-
-
-# Perform Scaling
-scaler = StandardScaler()
-dataframe["NormalizedAmount"] = scaler.fit_transform(dataframe["Amount"].values.reshape(-1, 1))
-dataframe.drop(["Amount", "Time"], inplace= True, axis= 1)
-
-Y = dataframe["Class"]
-X = dataframe.drop(["Class"], axis= 1)
-
-
-# In[9]:
-
-
-Y.head()
-
-
-# In[10]:
-
-
-# Split the data
-(train_X, test_X, train_Y, test_Y) = train_test_split(X, Y, test_size= 0.3, random_state= 42)
-
-print("Shape of train_X: ", train_X.shape)
-print("Shape of test_X: ", test_X.shape)
-
-
-# Let's train different models on our dataset and observe which algorithm works better for our problem.
-# 
-# Let's apply Random Forests and Decision Trees algorithms to our dataset.
-
-# In[11]:
-
-
-# Decision Tree Classifier
-decision_tree = DecisionTreeClassifier()
-decision_tree.fit(train_X, train_Y)
-
-predictions_dt = decision_tree.predict(test_X)
-decision_tree_score = decision_tree.score(test_X, test_Y) * 100
-
-
-# In[12]:
-
-
-# Random Forest
-random_forest = RandomForestClassifier(n_estimators= 100)
-random_forest.fit(train_X, train_Y)
-
-predictions_rf = random_forest.predict(test_X)
-random_forest_score = random_forest.score(test_X, test_Y) * 100
-
-
-# In[13]:
-
-
-# Print scores of our classifiers
-
-print("Random Forest Score: ", random_forest_score)
-print("Decision Tree Score: ", decision_tree_score)
-
-
-# In[14]:
-
-
-# The below function is directly taken from the scikit-learn website to plot the confusion matrix
-
-def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion Matrix', cmap=plt.cm.Blues):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
-    else:
-        print('Confusion matrix, without normalization')
-
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=0)
-    plt.yticks(tick_marks, classes)
-
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt), horizontalalignment="center", color="white" if cm[i, j] > thresh else "black")
-
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    plt.tight_layout()
-
-
-# In[22]:
-
-
-# Plot confusion matrix for Decision Trees
-
-confusion_matrix_dt = confusion_matrix(test_Y, predictions_dt.round())
-print("Confusion Matrix - Decision Tree")
-print(confusion_matrix_dt)
-
-
-# In[18]:
-
-
-plot_confusion_matrix(confusion_matrix_dt, classes=[0, 1], title= "Confusion Matrix - Decision Tree")
-
-
-# In[20]:
-
-
-# Plot confusion matrix for Random Forests
-
-confusion_matrix_rf = confusion_matrix(test_Y, predictions_rf.round())
-print("Confusion Matrix - Random Forest")
-print(confusion_matrix_rf)
-
-
-# In[23]:
-
-
-plot_confusion_matrix(confusion_matrix_rf, classes=[0, 1], title= "Confusion Matrix - Random Forest")
-
-
-# In[24]:
-
-
-# The below function prints the following necesary metrics
-
-def metrics(actuals, predictions):
-    print("Accuracy: {:.5f}".format(accuracy_score(actuals, predictions)))
-    print("Precision: {:.5f}".format(precision_score(actuals, predictions)))
-    print("Recall: {:.5f}".format(recall_score(actuals, predictions)))
-    print("F1-score: {:.5f}".format(f1_score(actuals, predictions)))
-    
-
-
-# In[25]:
-
-
-print("Evaluation of Decision Tree Model")
-print()
-metrics(test_Y, predictions_dt.round())
-
-
-# In[26]:
-
-
-print("Evaluation of Random Forest Model")
-print()
-metrics(test_Y, predictions_rf.round())
-
-
-# Clearly, Random Forest model works better than Decision Trees
-
-# But, if we clearly observe our dataset suffers a serious problem of **class imbalance**. 
-# The genuine (not fraud) transactions are more than 99% with the fraud transactions constituting of 0.17%.
-# 
-# With such kind of distribution, if we train our model without taking care of the imbalance issues, it predicts the label with higher importance given to genuine transactions (as there are more data about them) and hence obtains more accuracy.
-
-# The class imbalance problem can be solved by various techniques. **Over sampling** is one of them.
-#  
-# One approach to addressing imbalanced datasets is to oversample the minority class. The simplest approach involves duplicating examples in the minority class, although these examples don’t add any new information to the model. 
-# 
-# Instead, new examples can be synthesized from the existing examples. This is a type of data augmentation for the minority class and is referred to as the **Synthetic Minority Oversampling Technique**, or **SMOTE** for short.
-
-# In[27]:
-
-
-# Performing oversampling on the training data only
-
+import pandas as pd
 from imblearn.over_sampling import SMOTE
-
-# Step 1: Split the original dataset before applying SMOTE
-train_X, test_X, train_Y, test_Y = train_test_split(
-    X,
-    Y,
-    test_size=0.3,
-    random_state=42,
-    stratify=Y
+from imblearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    average_precision_score,
+    classification_report,
+    confusion_matrix,
+    roc_auc_score,
 )
-
-# Step 2: Apply SMOTE only to the training data
-smote = SMOTE(random_state=42)
-X_resampled, Y_resampled = smote.fit_resample(train_X, train_Y)
-
-print("Original training shape of X:", train_X.shape)
-print("Resampled training shape of X:", X_resampled.shape)
-print("Resampled training shape of Y:", Y_resampled.shape)
-
-value_counts = Counter(Y_resampled)
-print("Class distribution after SMOTE:", value_counts)
-
-# Step 3: Train the Random Forest classifier
-rf_resampled = RandomForestClassifier(n_estimators=100, random_state=42)
-rf_resampled.fit(X_resampled, Y_resampled)
-
-# Step 4: Evaluate on the original test data
-predictions_resampled = rf_resampled.predict(test_X)
-random_forest_score_resampled = rf_resampled.score(test_X, test_Y) * 100
-
-print("Random Forest accuracy after SMOTE:", random_forest_score_resampled, "%")
-
-# Step 5: Display the confusion matrix
-cm_resampled = confusion_matrix(test_Y, predictions_resampled)
-
-print("Confusion Matrix - Random Forest after SMOTE")
-print(cm_resampled)
-
-plot_confusion_matrix(
-    cm_resampled,
-    classes=[0, 1],
-    title="Confusion Matrix - Random Forest After SMOTE"
-)
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 
-# In[35]:
+RANDOM_STATE = 42
+TARGET_COLUMN = "Class"
+AMOUNT_COLUMN = "Amount"
+TIME_COLUMN = "Time"
 
 
-# Build the Random Forest classifier on the new dataset
-
-rf_resampled = RandomForestClassifier(n_estimators = 100)
-rf_resampled.fit(train_X, train_Y)
-
-predictions_resampled = rf_resampled.predict(test_X)
-random_forest_score_resampled = rf_resampled.score(test_X, test_Y) * 100
-
-
-# In[36]:
-
-
-# Visualize the confusion matrix
-
-cm_resampled = confusion_matrix(test_Y, predictions_resampled)
-print("Confusion Matrix - Random Forest")
-print(cm_resampled)
-
-
-# In[37]:
-
-
-plot_confusion_matrix(cm_resampled, classes=[0, 1], title= "Confusion Matrix - Random Forest After Oversampling")
-
-
-# In[38]:
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate a credit card fraud classifier."
+    )
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=Path("creditcard.csv"),
+        help="Path to the Kaggle creditcard.csv file.",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Probability threshold used to classify a transaction as fraud.",
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Display the class distribution and confusion matrix plots.",
+    )
+    return parser.parse_args()
 
 
-print("Evaluation of Random Forest Model")
-print()
-metrics(test_Y, predictions_resampled.round())
+def load_data(path: Path) -> pd.DataFrame:
+    """Load and validate the transaction dataset."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {path}. "
+            "Download creditcard.csv from Kaggle and place it in the project root."
+        )
+
+    dataframe = pd.read_csv(path)
+    required_columns = {TARGET_COLUMN, AMOUNT_COLUMN, TIME_COLUMN}
+    missing_columns = required_columns - set(dataframe.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Dataset is missing required columns: {missing}")
+
+    if dataframe[TARGET_COLUMN].isna().any():
+        raise ValueError(f"Column {TARGET_COLUMN!r} contains missing values.")
+
+    return dataframe
 
 
-# Now it is evident that after addressing the class imbalance problem, our Random forest classifier with SMOTE performs far better than the Random forest classifier withour SMOTE
+def prepare_data(
+    dataframe: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    """Prepare features and make a stratified train/test split."""
+    features = dataframe.drop(columns=[TARGET_COLUMN, TIME_COLUMN])
+    target = dataframe[TARGET_COLUMN].astype("int64")
 
-# In[ ]:
+    return train_test_split(
+        features,
+        target,
+        test_size=0.30,
+        random_state=RANDOM_STATE,
+        stratify=target,
+    )
 
 
+def build_model() -> Pipeline:
+    """Build a pipeline that fits scaling and SMOTE only on training data."""
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("amount_scaler", StandardScaler(), [AMOUNT_COLUMN]),
+        ],
+        remainder="passthrough",
+    )
+
+    return Pipeline(
+        steps=[
+            ("preprocessor", preprocessor),
+            ("smote", SMOTE(random_state=RANDOM_STATE)),
+            (
+                "classifier",
+                RandomForestClassifier(
+                    n_estimators=100,
+                    random_state=RANDOM_STATE,
+                    n_jobs=-1,
+                    class_weight=None,
+                ),
+            ),
+        ]
+    )
 
 
+def evaluate_model(
+    model: Pipeline,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    threshold: float,
+) -> dict[str, float]:
+    """Print classification metrics and return the main scores."""
+    probabilities = model.predict_proba(x_test)[:, 1]
+    predictions = (probabilities >= threshold).astype("int64")
+
+    print("\nClassification report")
+    print(
+        classification_report(
+            y_test,
+            predictions,
+            target_names=["Legitimate", "Fraud"],
+            zero_division=0,
+        )
+    )
+
+    matrix = confusion_matrix(y_test, predictions)
+    print("Confusion matrix")
+    print(matrix)
+
+    scores = {
+        "roc_auc": roc_auc_score(y_test, probabilities),
+        "pr_auc": average_precision_score(y_test, probabilities),
+    }
+    print(f"ROC-AUC: {scores['roc_auc']:.5f}")
+    print(f"PR-AUC:  {scores['pr_auc']:.5f}")
+    print(f"Threshold: {threshold:.2f}")
+    return scores
+
+
+def plot_results(dataframe: pd.DataFrame, matrix: object) -> None:
+    """Display class distribution and confusion matrix plots."""
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    dataframe[TARGET_COLUMN].value_counts().sort_index().plot(
+        kind="bar",
+        ax=axes[0],
+        color=["steelblue", "darkred"],
+    )
+    axes[0].set_title("Class distribution")
+    axes[0].set_xlabel("Class (0 = legitimate, 1 = fraud)")
+    axes[0].set_ylabel("Transactions")
+    axes[0].tick_params(axis="x", rotation=0)
+
+    axes[1].imshow(matrix, interpolation="nearest", cmap=plt.cm.Blues)
+    axes[1].set_title("Confusion matrix")
+    axes[1].set_xlabel("Predicted label")
+    axes[1].set_ylabel("True label")
+    axes[1].set_xticks([0, 1], ["Legitimate", "Fraud"])
+    axes[1].set_yticks([0, 1], ["Legitimate", "Fraud"])
+
+    for row in range(2):
+        for column in range(2):
+            axes[1].text(
+                column,
+                row,
+                str(matrix[row][column]),
+                ha="center",
+                va="center",
+                color="white" if matrix[row][column] > matrix.max() / 2 else "black",
+            )
+
+    figure.tight_layout()
+    plt.show()
+
+
+def main() -> None:
+    """Load data, train the model, and report evaluation metrics."""
+    args = parse_args()
+    if not 0 < args.threshold < 1:
+        raise ValueError("--threshold must be strictly between 0 and 1.")
+
+    dataframe = load_data(args.data)
+    print(f"Loaded {len(dataframe):,} transactions.")
+    print(f"Fraud rate: {dataframe[TARGET_COLUMN].mean() * 100:.4f}%")
+
+    x_train, x_test, y_train, y_test = prepare_data(dataframe)
+    print(f"Training rows: {len(x_train):,}")
+    print(f"Test rows: {len(x_test):,}")
+
+    model = build_model()
+    model.fit(x_train, y_train)
+
+    probabilities = model.predict_proba(x_test)[:, 1]
+    predictions = (probabilities >= args.threshold).astype("int64")
+    scores = evaluate_model(model, x_test, y_test, args.threshold)
+
+    if args.plot:
+        plot_results(dataframe, confusion_matrix(y_test, predictions))
+
+    print(
+        f"\nEvaluation complete: PR-AUC={scores['pr_auc']:.5f}, "
+        f"ROC-AUC={scores['roc_auc']:.5f}"
+    )
+
+
+if __name__ == "__main__":
+    main()
