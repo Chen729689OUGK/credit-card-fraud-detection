@@ -24,7 +24,6 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.preprocessing import StandardScaler
 
-
 RANDOM_STATE = 42
 TARGET_COLUMN = "Class"
 AMOUNT_COLUMN = "Amount"
