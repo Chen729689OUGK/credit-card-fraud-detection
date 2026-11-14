@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import joblib
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -16,11 +16,14 @@ from sklearn.metrics import (
     average_precision_score,
     classification_report,
     confusion_matrix,
+    f1_score,
+    make_scorer,
+    precision_score,
+    recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.preprocessing import StandardScaler
-
 
 RANDOM_STATE = 42
 TARGET_COLUMN = "Class"
@@ -49,6 +52,18 @@ def parse_args() -> argparse.Namespace:
         "--plot",
         action="store_true",
         help="Display the class distribution and confusion matrix plots.",
+    )
+    parser.add_argument(
+        "--cv-folds",
+        type=int,
+        default=5,
+        help="Number of stratified cross-validation folds.",
+    )
+    parser.add_argument(
+        "--model-output",
+        type=Path,
+        default=Path("fraud_detection_model.joblib"),
+        help="Path where the selected trained model is saved.",
     )
     return parser.parse_args()
 
@@ -90,8 +105,8 @@ def prepare_data(
     )
 
 
-def build_model() -> Pipeline:
-    """Build a pipeline that fits scaling and SMOTE only on training data."""
+def build_model(strategy: str) -> Pipeline:
+    """Build a leakage-free pipeline for the requested imbalance strategy."""
     preprocessor = ColumnTransformer(
         transformers=[
             ("amount_scaler", StandardScaler(), [AMOUNT_COLUMN]),
@@ -99,21 +114,25 @@ def build_model() -> Pipeline:
         remainder="passthrough",
     )
 
-    return Pipeline(
-        steps=[
-            ("preprocessor", preprocessor),
-            ("smote", SMOTE(random_state=RANDOM_STATE)),
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=100,
-                    random_state=RANDOM_STATE,
-                    n_jobs=-1,
-                    class_weight=None,
-                ),
+    if strategy not in {"standard", "balanced", "smote"}:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+    steps = [("preprocessor", preprocessor)]
+    if strategy == "smote":
+        steps.append(("smote", SMOTE(random_state=RANDOM_STATE)))
+
+    steps.append(
+        (
+            "classifier",
+            RandomForestClassifier(
+                n_estimators=100,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+                class_weight="balanced" if strategy == "balanced" else None,
             ),
-        ]
+        )
     )
+    return Pipeline(steps=steps)
 
 
 def evaluate_model(
@@ -121,8 +140,8 @@ def evaluate_model(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     threshold: float,
-) -> dict[str, float]:
-    """Print classification metrics and return the main scores."""
+) -> tuple[dict[str, float], object]:
+    """Print classification metrics and return scores and the confusion matrix."""
     probabilities = model.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= threshold).astype("int64")
 
@@ -141,17 +160,60 @@ def evaluate_model(
     print(matrix)
 
     scores = {
+        "precision": precision_score(y_test, predictions, zero_division=0),
+        "recall": recall_score(y_test, predictions, zero_division=0),
+        "f1": f1_score(y_test, predictions, zero_division=0),
         "roc_auc": roc_auc_score(y_test, probabilities),
         "pr_auc": average_precision_score(y_test, probabilities),
     }
+    print(f"Precision: {scores['precision']:.5f}")
+    print(f"Recall:    {scores['recall']:.5f}")
+    print(f"F1-score:  {scores['f1']:.5f}")
     print(f"ROC-AUC: {scores['roc_auc']:.5f}")
     print(f"PR-AUC:  {scores['pr_auc']:.5f}")
     print(f"Threshold: {threshold:.2f}")
-    return scores
+    return scores, matrix
+
+
+def cross_validate_model(
+    model: Pipeline,
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    cv_folds: int,
+) -> dict[str, float]:
+    """Evaluate a model with stratified cross-validation on training data."""
+    scoring = {
+        "precision": make_scorer(precision_score, zero_division=0),
+        "recall": make_scorer(recall_score, zero_division=0),
+        "f1": make_scorer(f1_score, zero_division=0),
+        "pr_auc": "average_precision",
+        "roc_auc": "roc_auc",
+    }
+    splitter = StratifiedKFold(
+        n_splits=cv_folds,
+        shuffle=True,
+        random_state=RANDOM_STATE,
+    )
+    scores = cross_validate(
+        model,
+        x_train,
+        y_train,
+        cv=splitter,
+        scoring=scoring,
+        n_jobs=1,
+        return_train_score=False,
+        error_score="raise",
+    )
+    return {
+        metric: scores[f"test_{metric}"].mean()
+        for metric in scoring
+    }
 
 
 def plot_results(dataframe: pd.DataFrame, matrix: object) -> None:
     """Display class distribution and confusion matrix plots."""
+    import matplotlib.pyplot as plt
+
     figure, axes = plt.subplots(1, 2, figsize=(11, 4))
 
     dataframe[TARGET_COLUMN].value_counts().sort_index().plot(
@@ -191,6 +253,8 @@ def main() -> None:
     args = parse_args()
     if not 0 < args.threshold < 1:
         raise ValueError("--threshold must be strictly between 0 and 1.")
+    if args.cv_folds < 2:
+        raise ValueError("--cv-folds must be at least 2.")
 
     dataframe = load_data(args.data)
     print(f"Loaded {len(dataframe):,} transactions.")
@@ -200,20 +264,67 @@ def main() -> None:
     print(f"Training rows: {len(x_train):,}")
     print(f"Test rows: {len(x_test):,}")
 
-    model = build_model()
-    model.fit(x_train, y_train)
+    strategies = {
+        "standard": "Random Forest standard",
+        "balanced": "Random Forest class_weight=balanced",
+        "smote": "Random Forest avec SMOTE",
+    }
+    results: list[dict[str, float | str]] = []
+    cv_results: list[dict[str, float | str]] = []
+    trained_models: dict[str, Pipeline] = {}
+    matrices: dict[str, object] = {}
 
-    probabilities = model.predict_proba(x_test)[:, 1]
-    predictions = (probabilities >= args.threshold).astype("int64")
-    scores = evaluate_model(model, x_test, y_test, args.threshold)
+    for strategy, name in strategies.items():
+        print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
+        model = build_model(strategy)
+        validation_scores = cross_validate_model(
+            model,
+            x_train,
+            y_train,
+            args.cv_folds,
+        )
+        cv_results.append({"strategy": name, **validation_scores})
+        print("Cross-validation means")
+        for metric, score in validation_scores.items():
+            print(f"{metric}: {score:.5f}")
+
+        model.fit(x_train, y_train)
+        trained_models[strategy] = model
+        scores, matrix = evaluate_model(
+            model,
+            x_test,
+            y_test,
+            args.threshold,
+        )
+        results.append({"strategy": name, **scores})
+        matrices[strategy] = matrix
+
+    cv_comparison = pd.DataFrame(cv_results).set_index("strategy")
+    print("\nCross-validation comparison")
+    print(
+        cv_comparison[
+            ["precision", "recall", "f1", "pr_auc", "roc_auc"]
+        ].round(5)
+    )
+
+    comparison = pd.DataFrame(results).set_index("strategy")
+    print("\nModel comparison")
+    print(comparison[["precision", "recall", "f1", "pr_auc", "roc_auc"]].round(5))
+
+    best_strategy = cv_comparison["pr_auc"].idxmax()
+    best_strategy_key = next(
+        strategy
+        for strategy, name in strategies.items()
+        if name == best_strategy
+    )
+    best_model = trained_models[best_strategy_key]
+    args.model_output.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(best_model, args.model_output)
+    print(f"\nSelected model according to CV PR-AUC: {best_strategy}")
+    print(f"Saved model: {args.model_output}")
 
     if args.plot:
-        plot_results(dataframe, confusion_matrix(y_test, predictions))
-
-    print(
-        f"\nEvaluation complete: PR-AUC={scores['pr_auc']:.5f}, "
-        f"ROC-AUC={scores['roc_auc']:.5f}"
-    )
+        plot_results(dataframe, matrices["smote"])
 
 
 if __name__ == "__main__":

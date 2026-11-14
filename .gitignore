@@ -16,3 +16,4 @@ env/
 
 # Dataset volumineux
 creditcard.csv
+*.joblib
