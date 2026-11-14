@@ -17,11 +17,12 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     f1_score,
+    make_scorer,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 
@@ -52,6 +53,12 @@ def parse_args() -> argparse.Namespace:
         "--plot",
         action="store_true",
         help="Display the class distribution and confusion matrix plots.",
+    )
+    parser.add_argument(
+        "--cv-folds",
+        type=int,
+        default=5,
+        help="Number of stratified cross-validation folds.",
     )
     return parser.parse_args()
 
@@ -163,6 +170,41 @@ def evaluate_model(
     return scores, matrix
 
 
+def cross_validate_model(
+    model: Pipeline,
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    cv_folds: int,
+) -> dict[str, float]:
+    """Evaluate a model with stratified cross-validation on training data."""
+    scoring = {
+        "precision": make_scorer(precision_score, zero_division=0),
+        "recall": make_scorer(recall_score, zero_division=0),
+        "f1": make_scorer(f1_score, zero_division=0),
+        "pr_auc": "average_precision",
+        "roc_auc": "roc_auc",
+    }
+    splitter = StratifiedKFold(
+        n_splits=cv_folds,
+        shuffle=True,
+        random_state=RANDOM_STATE,
+    )
+    scores = cross_validate(
+        model,
+        x_train,
+        y_train,
+        cv=splitter,
+        scoring=scoring,
+        n_jobs=1,
+        return_train_score=False,
+        error_score="raise",
+    )
+    return {
+        metric: scores[f"test_{metric}"].mean()
+        for metric in scoring
+    }
+
+
 def plot_results(dataframe: pd.DataFrame, matrix: object) -> None:
     """Display class distribution and confusion matrix plots."""
     figure, axes = plt.subplots(1, 2, figsize=(11, 4))
@@ -204,6 +246,8 @@ def main() -> None:
     args = parse_args()
     if not 0 < args.threshold < 1:
         raise ValueError("--threshold must be strictly between 0 and 1.")
+    if args.cv_folds < 2:
+        raise ValueError("--cv-folds must be at least 2.")
 
     dataframe = load_data(args.data)
     print(f"Loaded {len(dataframe):,} transactions.")
@@ -219,11 +263,23 @@ def main() -> None:
         "smote": "Random Forest avec SMOTE",
     }
     results: list[dict[str, float | str]] = []
+    cv_results: list[dict[str, float | str]] = []
     matrices: dict[str, object] = {}
 
     for strategy, name in strategies.items():
         print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
         model = build_model(strategy)
+        validation_scores = cross_validate_model(
+            model,
+            x_train,
+            y_train,
+            args.cv_folds,
+        )
+        cv_results.append({"strategy": name, **validation_scores})
+        print("Cross-validation means")
+        for metric, score in validation_scores.items():
+            print(f"{metric}: {score:.5f}")
+
         model.fit(x_train, y_train)
         scores, matrix = evaluate_model(
             model,
@@ -233,6 +289,14 @@ def main() -> None:
         )
         results.append({"strategy": name, **scores})
         matrices[strategy] = matrix
+
+    cv_comparison = pd.DataFrame(cv_results).set_index("strategy")
+    print("\nCross-validation comparison")
+    print(
+        cv_comparison[
+            ["precision", "recall", "f1", "pr_auc", "roc_auc"]
+        ].round(5)
+    )
 
     comparison = pd.DataFrame(results).set_index("strategy")
     print("\nModel comparison")
