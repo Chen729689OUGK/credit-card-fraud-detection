@@ -52,11 +52,14 @@ python credit_card_fraud.py --threshold 0.3
 python credit_card_fraud.py --cv-folds 3
 python credit_card_fraud.py --plot
 python credit_card_fraud.py --data /path/to/creditcard.csv
+python credit_card_fraud.py --model-output models/fraud_model.joblib
 ```
 
 The probability threshold should be selected according to the operational cost
 of missed fraud versus false alerts. PR-AUC is the primary comparison metric
-because the fraud class is highly imbalanced.
+because the fraud class is highly imbalanced. The model with the best
+cross-validation PR-AUC is saved as a Joblib file by default at
+`fraud_detection_model.joblib`.
 
 ## Tests
 
@@ -76,6 +79,7 @@ credit_card_fraud.py       # Training and evaluation pipeline
 tests/                     # Automated tests
 credit_card_fraud.ipynb    # Exploratory notebook
 requirements.txt           # Python dependencies
+fraud_detection_model.joblib # Generated model artifact (ignored by Git)
 ```
 
 ## Limitations

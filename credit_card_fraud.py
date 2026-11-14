@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import joblib
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -57,6 +58,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=5,
         help="Number of stratified cross-validation folds.",
+    )
+    parser.add_argument(
+        "--model-output",
+        type=Path,
+        default=Path("fraud_detection_model.joblib"),
+        help="Path where the selected trained model is saved.",
     )
     return parser.parse_args()
 
@@ -264,6 +271,7 @@ def main() -> None:
     }
     results: list[dict[str, float | str]] = []
     cv_results: list[dict[str, float | str]] = []
+    trained_models: dict[str, Pipeline] = {}
     matrices: dict[str, object] = {}
 
     for strategy, name in strategies.items():
@@ -281,6 +289,7 @@ def main() -> None:
             print(f"{metric}: {score:.5f}")
 
         model.fit(x_train, y_train)
+        trained_models[strategy] = model
         scores, matrix = evaluate_model(
             model,
             x_test,
@@ -302,8 +311,17 @@ def main() -> None:
     print("\nModel comparison")
     print(comparison[["precision", "recall", "f1", "pr_auc", "roc_auc"]].round(5))
 
-    best_strategy = comparison["pr_auc"].idxmax()
-    print(f"\nBest model according to PR-AUC: {best_strategy}")
+    best_strategy = cv_comparison["pr_auc"].idxmax()
+    best_strategy_key = next(
+        strategy
+        for strategy, name in strategies.items()
+        if name == best_strategy
+    )
+    best_model = trained_models[best_strategy_key]
+    args.model_output.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(best_model, args.model_output)
+    print(f"\nSelected model according to CV PR-AUC: {best_strategy}")
+    print(f"Saved model: {args.model_output}")
 
     if args.plot:
         plot_results(dataframe, matrices["smote"])
