@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -207,6 +206,8 @@ def cross_validate_model(
 
 def plot_results(dataframe: pd.DataFrame, matrix: object) -> None:
     """Display class distribution and confusion matrix plots."""
+    import matplotlib.pyplot as plt
+
     figure, axes = plt.subplots(1, 2, figsize=(11, 4))
 
     dataframe[TARGET_COLUMN].value_counts().sort_index().plot(
