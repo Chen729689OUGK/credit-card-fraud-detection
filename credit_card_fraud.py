@@ -16,6 +16,9 @@ from sklearn.metrics import (
     average_precision_score,
     classification_report,
     confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
@@ -90,8 +93,8 @@ def prepare_data(
     )
 
 
-def build_model() -> Pipeline:
-    """Build a pipeline that fits scaling and SMOTE only on training data."""
+def build_model(strategy: str) -> Pipeline:
+    """Build a leakage-free pipeline for the requested imbalance strategy."""
     preprocessor = ColumnTransformer(
         transformers=[
             ("amount_scaler", StandardScaler(), [AMOUNT_COLUMN]),
@@ -99,21 +102,25 @@ def build_model() -> Pipeline:
         remainder="passthrough",
     )
 
-    return Pipeline(
-        steps=[
-            ("preprocessor", preprocessor),
-            ("smote", SMOTE(random_state=RANDOM_STATE)),
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=100,
-                    random_state=RANDOM_STATE,
-                    n_jobs=-1,
-                    class_weight=None,
-                ),
+    if strategy not in {"standard", "balanced", "smote"}:
+        raise ValueError(f"Unknown strategy: {strategy}")
+
+    steps = [("preprocessor", preprocessor)]
+    if strategy == "smote":
+        steps.append(("smote", SMOTE(random_state=RANDOM_STATE)))
+
+    steps.append(
+        (
+            "classifier",
+            RandomForestClassifier(
+                n_estimators=100,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+                class_weight="balanced" if strategy == "balanced" else None,
             ),
-        ]
+        )
     )
+    return Pipeline(steps=steps)
 
 
 def evaluate_model(
@@ -121,8 +128,8 @@ def evaluate_model(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     threshold: float,
-) -> dict[str, float]:
-    """Print classification metrics and return the main scores."""
+) -> tuple[dict[str, float], object]:
+    """Print classification metrics and return scores and the confusion matrix."""
     probabilities = model.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= threshold).astype("int64")
 
@@ -141,13 +148,19 @@ def evaluate_model(
     print(matrix)
 
     scores = {
+        "precision": precision_score(y_test, predictions, zero_division=0),
+        "recall": recall_score(y_test, predictions, zero_division=0),
+        "f1": f1_score(y_test, predictions, zero_division=0),
         "roc_auc": roc_auc_score(y_test, probabilities),
         "pr_auc": average_precision_score(y_test, probabilities),
     }
+    print(f"Precision: {scores['precision']:.5f}")
+    print(f"Recall:    {scores['recall']:.5f}")
+    print(f"F1-score:  {scores['f1']:.5f}")
     print(f"ROC-AUC: {scores['roc_auc']:.5f}")
     print(f"PR-AUC:  {scores['pr_auc']:.5f}")
     print(f"Threshold: {threshold:.2f}")
-    return scores
+    return scores, matrix
 
 
 def plot_results(dataframe: pd.DataFrame, matrix: object) -> None:
@@ -200,20 +213,36 @@ def main() -> None:
     print(f"Training rows: {len(x_train):,}")
     print(f"Test rows: {len(x_test):,}")
 
-    model = build_model()
-    model.fit(x_train, y_train)
+    strategies = {
+        "standard": "Random Forest standard",
+        "balanced": "Random Forest class_weight=balanced",
+        "smote": "Random Forest avec SMOTE",
+    }
+    results: list[dict[str, float | str]] = []
+    matrices: dict[str, object] = {}
 
-    probabilities = model.predict_proba(x_test)[:, 1]
-    predictions = (probabilities >= args.threshold).astype("int64")
-    scores = evaluate_model(model, x_test, y_test, args.threshold)
+    for strategy, name in strategies.items():
+        print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
+        model = build_model(strategy)
+        model.fit(x_train, y_train)
+        scores, matrix = evaluate_model(
+            model,
+            x_test,
+            y_test,
+            args.threshold,
+        )
+        results.append({"strategy": name, **scores})
+        matrices[strategy] = matrix
+
+    comparison = pd.DataFrame(results).set_index("strategy")
+    print("\nModel comparison")
+    print(comparison[["precision", "recall", "f1", "pr_auc", "roc_auc"]].round(5))
+
+    best_strategy = comparison["pr_auc"].idxmax()
+    print(f"\nBest model according to PR-AUC: {best_strategy}")
 
     if args.plot:
-        plot_results(dataframe, confusion_matrix(y_test, predictions))
-
-    print(
-        f"\nEvaluation complete: PR-AUC={scores['pr_auc']:.5f}, "
-        f"ROC-AUC={scores['roc_auc']:.5f}"
-    )
+        plot_results(dataframe, matrices["smote"])
 
 
 if __name__ == "__main__":
